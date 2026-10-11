@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
+import argparse
 import sys
 
-from blessed import Terminal
-
 from game import Game
-from ui import Renderer, key_to_action
+from ui import Renderer, key_to_action, make_terminal
 
 
-def run() -> None:
-    term = Terminal()
-    game = Game()
+def run(seed: int | None = None) -> None:
+    term = make_terminal()
+    game = Game(seed)
     renderer = Renderer(term)
     with term.fullscreen(), term.cbreak(), term.hidden_cursor():
         size = None
@@ -36,7 +35,10 @@ def run() -> None:
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="A medieval fantasy roguelike for the terminal.")
+    parser.add_argument("--seed", type=int, help="seed the dungeon generator for a repeatable run")
+    args = parser.parse_args()
     try:
-        run()
+        run(args.seed)
     except KeyboardInterrupt:
         sys.exit(0)

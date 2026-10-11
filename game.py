@@ -10,6 +10,7 @@ from combat import describe_monster_attack, describe_player_attack, resolve_atta
 from data import combat_text
 from data.items import ITEMS
 from data.monsters import MONSTERS
+from data.rooms import DEPTH_INTROS, ROOM_DESCRIPTIONS
 from entities import Item, Monster, Player
 from fov import compute_fov
 from map_gen import generate_floor
@@ -18,6 +19,10 @@ from map_gen import generate_floor
 PLAYING = "playing"
 DEAD = "dead"
 INVENTORY = "inventory"
+HELP = "help"
+HISTORY = "history"
+CONFIRM_QUIT = "confirm_quit"
+MENUS = (INVENTORY, HELP, HISTORY, CONFIRM_QUIT)
 
 INVENTORY_SIZE = 12
 REGEN_INTERVAL = 8  # Turns per point of natural healing.
@@ -60,17 +65,31 @@ class Game:
         self.mode = PLAYING
         self.running = True
         self.death_cause = ""
+        self.history_offset = 0
+        self.log("Welcome, adventurer. Press ? at any time for help.", "bold_gold")
         self.build_floor()
-        self.log("You descend into the dungeon. Use WASD or the arrow keys to move.", "gold")
 
     def build_floor(self) -> None:
         self.game_map = generate_floor(self.rng)
+        descriptions = self.rng.sample(ROOM_DESCRIPTIONS, len(self.game_map.rooms))
+        for room, text in zip(self.game_map.rooms, descriptions):
+            room.description = text
         self.player.x, self.player.y = self.game_map.start
         self.monsters = []
         self.items = []
         self.spawn_monsters()
         self.spawn_items()
         self.update_fov()
+        intro = DEPTH_INTROS[min(self.depth, len(DEPTH_INTROS)) - 1]
+        self.log(f"Depth {self.depth}. {intro}", "gold")
+        self.enter_room()
+
+    def enter_room(self) -> None:
+        """Narrate a room the first time the player sets foot in it."""
+        room = self.game_map.room_at(*self.player.pos)
+        if room and not room.visited:
+            room.visited = True
+            self.log(room.description, "wheat")
 
     def spawn_monsters(self) -> None:
         max_per_room = min(1 + self.depth // 3, 3)
@@ -131,8 +150,9 @@ class Game:
     # -- messages --------------------------------------------------------
     def log(self, text: str, color: str = "white") -> None:
         last = self.messages[-1] if self.messages else None
-        if last and last.text == text and last.turn == self.turn:
+        if last and last.text == text:
             last.count += 1
+            last.turn = self.turn
         else:
             self.messages.append(Message(text, color, turn=self.turn))
 
@@ -143,7 +163,16 @@ class Game:
             self.running = False
         elif kind == "restart":
             self.new_game()
-        elif self.mode not in (PLAYING, INVENTORY):
+        elif kind == "open":
+            self.mode = action[1]
+            self.history_offset = 0
+        elif kind == "close":
+            self.mode = PLAYING
+        elif kind == "scroll":
+            self.history_offset = max(0, min(len(self.messages) - 1, self.history_offset + action[1]))
+        elif kind == "use" and self.mode == INVENTORY:
+            self.use_item(action[1])
+        elif self.mode != PLAYING:
             return
         elif kind == "move":
             self.try_move(action[1], action[2])
@@ -153,12 +182,6 @@ class Game:
             self.pick_up()
         elif kind == "descend":
             self.descend()
-        elif kind == "inventory":
-            self.mode = INVENTORY
-        elif kind == "close":
-            self.mode = PLAYING
-        elif kind == "use":
-            self.use_item(action[1])
 
     def try_move(self, dx: int, dy: int) -> None:
         nx, ny = self.player.x + dx, self.player.y + dy
@@ -171,6 +194,7 @@ class Game:
             return  # Bumping a wall costs no turn.
         self.player.x, self.player.y = nx, ny
         self.update_fov()
+        self.enter_room()
         self.describe_tile()
         self.end_turn()
 
@@ -216,8 +240,8 @@ class Game:
             self.log("There are no stairs here.", "gray50")
             return
         self.depth += 1
+        self.log("You descend the winding stairs. The air grows colder.", "gray70")
         self.build_floor()
-        self.log(f"You descend the stairs to depth {self.depth}. The air grows colder.", "gold")
 
     def player_attack(self, monster: Monster) -> None:
         result = resolve_attack(self.rng, self.player, monster)
@@ -228,6 +252,7 @@ class Game:
     def kill_monster(self, monster: Monster) -> None:
         self.monsters.remove(monster)
         self.player.kills += 1
+        self.player.kills_by_kind[monster.name] = self.player.kills_by_kind.get(monster.name, 0) + 1
         self.log(self.rng.choice(monster.template["death"]), "gold")
         if self.player.gain_xp(monster.xp):
             self.log(combat_text.LEVEL_UP.format(level=self.player.level), "bold_cyan")

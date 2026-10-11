@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import os
 import textwrap
 
 from blessed import Terminal
 
-from game import DEAD, INVENTORY, INVENTORY_SIZE
+from game import CONFIRM_QUIT, DEAD, HELP, HISTORY, INVENTORY, INVENTORY_SIZE
 from map_gen import FLOOR, MAP_HEIGHT, MAP_WIDTH, STAIRS, WALL
 
 SIDEBAR_X = MAP_WIDTH + 2
@@ -19,6 +20,24 @@ TILE_STYLE = {
     FLOOR: (".", "gray50", "gray19"),
     STAIRS: (">", "bold_white", "gray40"),
 }
+
+
+# On 16-color terminals blessed would round the dark grays down to black, hiding
+# remembered map tiles, so substitute basic colors that stay readable.
+FALLBACK_16 = {
+    "gray19": "bright_black", "gray27": "bright_black", "gray30": "bright_black",
+    "gray40": "bright_black", "gray46": "bright_black", "gray50": "white",
+    "gray62": "white", "gray70": "white", "sienna": "yellow", "wheat": "yellow",
+}
+
+
+def make_terminal() -> Terminal:
+    term = Terminal()
+    # Windows Terminal supports 24-bit color but does not always advertise it.
+    truecolor = os.environ.get("WT_SESSION") or os.environ.get("COLORTERM") in ("truecolor", "24bit")
+    if truecolor and term.does_styling and term.number_of_colors < 1 << 24:
+        term.number_of_colors = 1 << 24
+    return term
 
 
 def hp_style(hp: int, max_hp: int) -> str:
@@ -43,7 +62,10 @@ class Canvas:
 
     def seq(self, style: str) -> str:
         if style not in self._cache:
-            self._cache[style] = str(getattr(self.term, style)) if style else ""
+            name = style
+            if self.term.number_of_colors < 256:
+                name = FALLBACK_16.get(style, style)
+            self._cache[style] = str(getattr(self.term, name)) if name else ""
         return self._cache[style]
 
     def put(self, x: int, y: int, text: str, style: str = "") -> None:
@@ -95,6 +117,12 @@ class Renderer:
                 self.draw_game_over(canvas, game)
             elif game.mode == INVENTORY:
                 self.draw_inventory(canvas, game)
+            elif game.mode == HELP:
+                self.draw_help(canvas)
+            elif game.mode == HISTORY:
+                self.draw_history(canvas, game)
+            elif game.mode == CONFIRM_QUIT:
+                self.draw_box(canvas, [("Abandon this run and quit?", "bold_white"), ("", ""), ("[Y] quit    [N] keep playing", "bold_gold")])
         print(canvas.render(), end="", flush=True)
 
     def draw_map(self, canvas: Canvas, game) -> None:
@@ -183,6 +211,8 @@ class Renderer:
             ("i", "inventory"),
             (">", "descend stairs"),
             (". or space", "wait a turn"),
+            ("m", "message history"),
+            ("?", "help"),
             ("Esc", "quit"),
         ]
         y = max(y, MAP_HEIGHT - len(keys) - 1)
@@ -193,18 +223,20 @@ class Renderer:
 
     def draw_game_over(self, canvas: Canvas, game) -> None:
         p = game.player
+        tally = ", ".join(f"{n} {name}{'s' if n > 1 else ''}" for name, n in p.kills_by_kind.items())
         lines = [
             ("YOU HAVE DIED", "bold_red"),
             ("", ""),
-            (f"You were {game.death_cause}", "wheat"),
-            (f"on depth {game.depth}, after {game.turn} turns.", "wheat"),
+            (f"You were {game.death_cause} on depth {game.depth}", "wheat"),
+            (f"after {game.turn} turns in the dark.", "wheat"),
             ("", ""),
-            (f"Deepest depth:  {game.depth}", "white"),
-            (f"Monsters slain: {p.kills}", "white"),
-            (f"Level reached:  {p.level}", "white"),
-            ("", ""),
-            ("[R] descend again    [Q] quit", "bold_gold"),
+            (f"Depth reached:  {game.depth}".ljust(24), "white"),
+            (f"Level reached:  {p.level}".ljust(24), "white"),
+            (f"Monsters slain: {p.kills}".ljust(24), "white"),
         ]
+        for line in textwrap.wrap(tally, 44):
+            lines.append((line, "gray62"))
+        lines += [("", ""), ("[R] descend again    [Q] quit", "bold_gold")]
         self.draw_box(canvas, lines)
 
     def draw_inventory(self, canvas: Canvas, game) -> None:
@@ -218,6 +250,36 @@ class Renderer:
             heal = f"  (+{item.template['amount']} HP)" if item.template["effect"] == "heal" else ""
             lines.append((f"{chr(ord('a') + i)}) {item.name}{count}{heal}".ljust(40), "white"))
         lines += [("", ""), ("Press a letter to use, Esc to close", "gray62")]
+        self.draw_box(canvas, lines)
+
+    def draw_help(self, canvas: Canvas) -> None:
+        lines = [
+            ("HOW TO PLAY", "bold_gold"),
+            ("", ""),
+            ("Find the stairs (>) and descend as deep as you dare.", "wheat"),
+            ("Walk into a monster to attack it. Monsters act after you do.", "wheat"),
+            ("", ""),
+            ("WASD/arrows  move or attack    g   pick up item".ljust(58), "white"),
+            ("> or Enter   descend stairs    i   inventory / drink".ljust(58), "white"),
+            (". or space   wait a turn       m   message history".ljust(58), "white"),
+            ("Esc          quit              ?   this help".ljust(58), "white"),
+            ("", ""),
+            ("@ you   r rat   g goblin   s skeleton   ! potion   > stairs", "gray62"),
+            ("", ""),
+            ("Press any key to return", "gray62"),
+        ]
+        self.draw_box(canvas, lines)
+
+    def draw_history(self, canvas: Canvas, game) -> None:
+        width, height = MAP_WIDTH - 6, MAP_HEIGHT - 6
+        wrapped: list[tuple[str, str]] = []
+        for msg in game.messages:
+            for line in textwrap.wrap(message_text(msg), width) or [""]:
+                wrapped.append((line.ljust(width), msg.color))
+        end = max(height, len(wrapped) - game.history_offset)
+        body = wrapped[max(0, end - height):end]
+        body += [("".ljust(width), "")] * (height - len(body))
+        lines = [("MESSAGE HISTORY", "bold_gold"), *body, ("", ""), ("Up/Down or W/S to scroll, Esc to close", "gray62")]
         self.draw_box(canvas, lines)
 
     def draw_box(self, canvas: Canvas, lines: list[tuple[str, str]]) -> None:
@@ -238,11 +300,16 @@ class Renderer:
         width = canvas.width - 2
         lines: list[tuple[str, str]] = []
         for msg in game.messages[-height:]:
-            text = msg.text if msg.count == 1 else f"{msg.text} (x{msg.count})"
-            for line in textwrap.wrap(text, width) or [""]:
-                lines.append((line, msg.color))
+            # Messages from the latest turn are in full color; older ones fade to gray.
+            fresh = msg.turn >= game.turn - 1
+            for line in textwrap.wrap(message_text(msg), width) or [""]:
+                lines.append((line, msg.color if fresh else "gray46"))
         for i, (line, style) in enumerate(lines[-height:]):
             canvas.put(1, top + i, line, style)
+
+
+def message_text(msg) -> str:
+    return msg.text if msg.count == 1 else f"{msg.text} (x{msg.count})"
 
 
 MOVE_KEYS = {
@@ -260,12 +327,29 @@ def key_to_action(key, mode: str) -> tuple | None:
         if name in ("q", "KEY_ESCAPE"):
             return ("quit",)
         return None
+    if mode == CONFIRM_QUIT:
+        return ("quit",) if name == "y" else ("close",)
+    if mode == HELP:
+        return ("close",)
+    if mode == HISTORY:
+        if name in ("KEY_UP", "w"):
+            return ("scroll", 1)
+        if name in ("KEY_DOWN", "s"):
+            return ("scroll", -1)
+        if name == "KEY_PGUP":
+            return ("scroll", 10)
+        if name == "KEY_PGDOWN":
+            return ("scroll", -10)
+        if name in ("KEY_ESCAPE", "m", "q"):
+            return ("close",)
+        return None
     if mode == INVENTORY:
         if name in ("KEY_ESCAPE", "i", "q"):
             return ("close",)
         if len(name) == 1 and "a" <= name <= "z":
             return ("use", ord(name) - ord("a"))
         return None
+
     if name in MOVE_KEYS:
         return ("move", *MOVE_KEYS[name])
     if name in (".", " "):
@@ -273,9 +357,13 @@ def key_to_action(key, mode: str) -> tuple | None:
     if name == "g":
         return ("pickup",)
     if name == "i":
-        return ("inventory",)
+        return ("open", INVENTORY)
+    if name == "m":
+        return ("open", HISTORY)
+    if name == "?":
+        return ("open", HELP)
     if name in (">", "KEY_ENTER"):
         return ("descend",)
     if name == "KEY_ESCAPE" or str(key) == "Q":
-        return ("quit",)
+        return ("open", CONFIRM_QUIT)
     return None

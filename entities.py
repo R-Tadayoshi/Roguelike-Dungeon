@@ -43,6 +43,7 @@ class Player(Actor):
         self.level = 1
         self.xp = 0
         self.kills = 0
+        self.kills_by_kind: dict[str, int] = {}
         self.inventory: list[Item] = []
 
     @property
