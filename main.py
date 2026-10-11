@@ -52,14 +52,42 @@ def run(seed: int | None = None, use_color: bool = True) -> None:
                     game.submit(line)
 
 
+def self_check() -> int:
+    """Draw one frame off-screen with a real terminal type, as the game would, and report."""
+    import contextlib
+    import io
+
+    from blessed import Terminal
+
+    kind = "vtwin10" if sys.platform == "win32" else "xterm-256color"
+    term = Terminal(kind=kind, force_styling=True, stream=io.StringIO())
+    frame = io.StringIO()
+    with contextlib.redirect_stdout(frame):
+        Renderer(term).draw(Game(1), LineEditor())
+    print(f"ok: terminal={term.kind} colors={term.number_of_colors} frame={len(frame.getvalue())} chars")
+    return 0 if term.number_of_colors and frame.getvalue() else 1
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="A medieval fantasy text adventure roguelike for the terminal.")
     parser.add_argument("--seed", type=int, help="seed the dungeon generator for a repeatable run")
     parser.add_argument("--no-color", action="store_true", help="play without colors (also set by NO_COLOR)")
+    # Used by the .exe build to confirm the terminal library works once bundled.
+    parser.add_argument("--check", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
+    if args.check:
+        sys.exit(self_check())
     # https://no-color.org: any non-empty NO_COLOR value turns colors off.
     use_color = not (args.no_color or os.environ.get("NO_COLOR"))
     try:
         run(args.seed, use_color)
     except KeyboardInterrupt:
         sys.exit(0)
+    except Exception:
+        # Started by double-clicking the .exe, the window would vanish with the error in it.
+        if getattr(sys, "frozen", False):
+            import traceback
+
+            traceback.print_exc()
+            input("\nThe game crashed. Press Enter to close this window.")
+        raise

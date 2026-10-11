@@ -23,13 +23,27 @@ as you dare. Every floor is different, and when you die the run is over.
  > _
 ```
 
-## Requirements
+## Just want to play? (Windows)
+
+Double-click **`dist/Roguelike.exe`**. It's the whole game in one file, and it
+doesn't need Python installed, so you can copy it to any Windows PC.
+
+The first time you run it, Windows may show "Windows protected your PC" because
+the file isn't signed. Click **More info**, then **Run anyway**.
+
+The exe is rebuilt automatically on GitHub (`.github/workflows/build-exe.yml`)
+every time the code changes, so a `git pull` always brings the latest version.
+
+On macOS or Linux, use `dist/roguelike.pyz` instead: `python3 roguelike.pyz`
+runs it with no install step. Rebuild it with `python build.py`.
+
+## Running from source
+
+Requirements:
 
 - Python 3.11 or newer
 - Windows Terminal (recommended), or any terminal with ANSI color support
 - A window of at least **80 x 24** characters
-
-## Running it
 
 ```powershell
 # from the project folder
@@ -46,21 +60,6 @@ Run `python main.py --seed 42` to play a repeatable dungeon.
 Run `python main.py --no-color` to play in plain black and white. Setting the
 `NO_COLOR` environment variable does the same. You can also switch while playing
 with `color off` and `color on`.
-
-## Playing on another computer
-
-`dist/roguelike.pyz` is the whole game in one file, with its libraries bundled in.
-Copy it to any computer that has Python 3.11 or newer (Windows, macOS or Linux),
-then run:
-
-```
-python roguelike.pyz
-```
-
-On Windows, copy `dist/Play Roguelike.bat` into the same folder and double-click it
-instead. The options work as usual, for example `python roguelike.pyz --no-color`.
-
-After changing the code, rebuild both files with `python build.py`.
 
 ## Commands
 
