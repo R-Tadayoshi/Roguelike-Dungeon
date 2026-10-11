@@ -47,6 +47,21 @@ Run `python main.py --no-color` to play in plain black and white. Setting the
 `NO_COLOR` environment variable does the same. You can also switch while playing
 with `color off` and `color on`.
 
+## Playing on another computer
+
+`dist/roguelike.pyz` is the whole game in one file, with its libraries bundled in.
+Copy it to any computer that has Python 3.11 or newer (Windows, macOS or Linux),
+then run:
+
+```
+python roguelike.pyz
+```
+
+On Windows, copy `dist/Play Roguelike.bat` into the same folder and double-click it
+instead. The options work as usual, for example `python roguelike.pyz --no-color`.
+
+After changing the code, rebuild both files with `python build.py`.
+
 ## Commands
 
 Type a command and press Enter. Short forms are in brackets.
