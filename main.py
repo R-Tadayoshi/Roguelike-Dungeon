@@ -29,7 +29,7 @@ def run() -> None:
             key = term.inkey(timeout=0.25, esc_delay=0.05)
             if not key:
                 continue
-            action = key_to_action(key)
+            action = key_to_action(key, game.mode)
             if action:
                 game.handle(action)
                 dirty = True

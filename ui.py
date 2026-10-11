@@ -6,6 +6,7 @@ import textwrap
 
 from blessed import Terminal
 
+from game import DEAD
 from map_gen import FLOOR, MAP_HEIGHT, MAP_WIDTH, STAIRS, WALL
 
 SIDEBAR_X = MAP_WIDTH + 2
@@ -18,6 +19,15 @@ TILE_STYLE = {
     FLOOR: (".", "gray50", "gray19"),
     STAIRS: (">", "bold_white", "gray40"),
 }
+
+
+def hp_style(hp: int, max_hp: int) -> str:
+    ratio = hp / max_hp
+    if ratio > 0.5:
+        return "green"
+    if ratio > 0.25:
+        return "yellow"
+    return "red"
 
 
 class Canvas:
@@ -79,7 +89,10 @@ class Renderer:
         else:
             self.draw_map(canvas, game)
             self.draw_status(canvas, game)
+            self.draw_sidebar(canvas, game)
             self.draw_log(canvas, game)
+            if game.mode == DEAD:
+                self.draw_game_over(canvas, game)
         print(canvas.render(), end="", flush=True)
 
     def draw_map(self, canvas: Canvas, game) -> None:
@@ -93,15 +106,96 @@ class Renderer:
                     continue
                 char, lit, remembered = TILE_STYLE[tile]
                 canvas.put(x, y, char, lit if gm.visible[y][x] else remembered)
+        for m in game.visible_monsters():
+            canvas.put(m.x, m.y, m.char, m.color)
         p = game.player
         canvas.put(p.x, p.y, p.char, p.color)
 
     def draw_status(self, canvas: Canvas, game) -> None:
         p = game.player
         y = MAP_HEIGHT
-        canvas.put(0, y, f" HP {p.hp}/{p.max_hp}", "bold_white")
-        canvas.put(20, y, f"Depth {game.depth}", "bold_white")
+        x = 1
+        canvas.put(x, y, "HP ", "bold_white")
+        x += 3
+        bar_style = hp_style(p.hp, p.max_hp)
+        filled = round(12 * p.hp / p.max_hp)
+        canvas.put(x, y, "█" * filled, bar_style)
+        canvas.put(x + filled, y, "░" * (12 - filled), "gray27")
+        x += 13
+        for label, value in (
+            ("", f"{p.hp}/{p.max_hp}"),
+            ("Depth ", str(game.depth)),
+            ("Level ", str(p.level)),
+            ("XP ", f"{p.xp}/{p.xp_to_next}"),
+            ("Kills ", str(p.kills)),
+        ):
+            canvas.put(x, y, label, "gray62")
+            canvas.put(x + len(label), y, value, "bold_white")
+            x += len(label) + len(value) + 4
         canvas.put(0, y + 1, "─" * (canvas.width - 1), "gray30")
+
+    def draw_sidebar(self, canvas: Canvas, game) -> None:
+        p = game.player
+        x = SIDEBAR_X
+        y = 0
+        canvas.put(x, y, "THE ADVENTURER", "bold_gold")
+        y += 1
+        canvas.put(x, y, f"Attack  {p.attack:<4}Defense {p.defense}", "wheat")
+        y += 2
+
+        canvas.put(x, y, "IN SIGHT", "bold_gold")
+        y += 1
+        seen = game.visible_monsters()
+        if not seen:
+            canvas.put(x, y, "Nothing stirs.", "gray50")
+            y += 1
+        for m in seen[:6]:
+            canvas.put(x, y, m.char, m.color)
+            canvas.put(x + 2, y, m.name[:14], "white")
+            filled = max(1, round(8 * m.hp / m.max_hp))
+            canvas.put(x + 17, y, "█" * filled, hp_style(m.hp, m.max_hp))
+            canvas.put(x + 17 + filled, y, "░" * (8 - filled), "gray27")
+            y += 1
+        y += 1
+
+        keys = [
+            ("WASD/arrows", "move, attack"),
+            (". or space", "wait a turn"),
+            ("Esc", "quit"),
+        ]
+        y = max(y, MAP_HEIGHT - len(keys) - 1)
+        canvas.put(x, y, "KEYS", "bold_gold")
+        for i, (k, desc) in enumerate(keys):
+            canvas.put(x, y + 1 + i, k, "bold_white")
+            canvas.put(x + 12, y + 1 + i, desc, "gray62")
+
+    def draw_game_over(self, canvas: Canvas, game) -> None:
+        p = game.player
+        lines = [
+            ("YOU HAVE DIED", "bold_red"),
+            ("", ""),
+            (f"You were {game.death_cause}", "wheat"),
+            (f"on depth {game.depth}, after {game.turn} turns.", "wheat"),
+            ("", ""),
+            (f"Deepest depth:  {game.depth}", "white"),
+            (f"Monsters slain: {p.kills}", "white"),
+            (f"Level reached:  {p.level}", "white"),
+            ("", ""),
+            ("[R] descend again    [Q] quit", "bold_gold"),
+        ]
+        self.draw_box(canvas, lines)
+
+    def draw_box(self, canvas: Canvas, lines: list[tuple[str, str]]) -> None:
+        """Draw a bordered, centered panel over the map."""
+        inner = max(len(text) for text, _ in lines) + 4
+        left = max(0, (MAP_WIDTH - inner - 2) // 2)
+        top = max(0, (MAP_HEIGHT - len(lines) - 2) // 2)
+        canvas.put(left, top, "╔" + "═" * inner + "╗", "gold")
+        for i, (text, style) in enumerate(lines):
+            row = top + 1 + i
+            canvas.put(left, row, "║" + " " * inner + "║", "gold")
+            canvas.put(left + 1 + (inner - len(text)) // 2, row, text, style)
+        canvas.put(left, top + len(lines) + 1, "╚" + "═" * inner + "╝", "gold")
 
     def draw_log(self, canvas: Canvas, game) -> None:
         top = MAP_HEIGHT + 2
@@ -122,11 +216,19 @@ MOVE_KEYS = {
 }
 
 
-def key_to_action(key) -> tuple | None:
-    """Translate a blessed keystroke into a game action tuple."""
+def key_to_action(key, mode: str) -> tuple | None:
+    """Translate a blessed keystroke into a game action tuple for the current mode."""
     name = key.name if key.is_sequence else str(key).lower()
+    if mode == DEAD:
+        if name == "r":
+            return ("restart",)
+        if name in ("q", "KEY_ESCAPE"):
+            return ("quit",)
+        return None
     if name in MOVE_KEYS:
         return ("move", *MOVE_KEYS[name])
+    if name in (".", " "):
+        return ("wait",)
     if name == "KEY_ESCAPE" or str(key) == "Q":
         return ("quit",)
     return None

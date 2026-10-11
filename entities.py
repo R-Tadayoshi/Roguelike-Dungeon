@@ -40,3 +40,41 @@ class Actor(Entity):
 class Player(Actor):
     def __init__(self, x: int, y: int):
         super().__init__(x, y, "@", "bold_yellow", "you", hp=30, attack=5, defense=1)
+        self.level = 1
+        self.xp = 0
+        self.kills = 0
+
+    @property
+    def xp_to_next(self) -> int:
+        return self.level * 20
+
+    def gain_xp(self, amount: int) -> int:
+        """Add experience; return how many levels were gained."""
+        self.xp += amount
+        gained = 0
+        while self.xp >= self.xp_to_next:
+            self.xp -= self.xp_to_next
+            self.level += 1
+            gained += 1
+            self.max_hp += 8
+            self.hp = min(self.max_hp, self.hp + 8)
+            self.attack += 1
+            if self.level % 2 == 0:
+                self.defense += 1
+        return gained
+
+
+class Monster(Actor):
+    """A monster built from a template in data/monsters.py, scaled to the dungeon depth."""
+
+    def __init__(self, x: int, y: int, kind: str, template: dict, depth: int):
+        hp = round(template["hp"] * (1 + 0.15 * (depth - 1)))
+        attack = template["attack"] + (depth - 1) // 2
+        defense = template["defense"] + (depth - 1) // 4
+        super().__init__(x, y, template["char"], template["color"], template["name"], hp, attack, defense)
+        self.kind = kind
+        self.template = template
+        self.ai = template.get("ai", "chase")
+        self.xp = template["xp"] + depth - 1
+        self.alerted = False
+        self.last_seen: tuple[int, int] | None = None
