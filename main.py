@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 try:
@@ -19,9 +20,9 @@ from game import Game  # noqa: E402
 from ui import LineEditor, Renderer, make_terminal  # noqa: E402
 
 
-def run(seed: int | None = None) -> None:
+def run(seed: int | None = None, use_color: bool = True) -> None:
     term = make_terminal()
-    game = Game(seed)
+    game = Game(seed, use_color)
     renderer = Renderer(term)
     editor = LineEditor()
     with term.fullscreen(), term.cbreak(), term.hidden_cursor():
@@ -54,8 +55,11 @@ def run(seed: int | None = None) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="A medieval fantasy text adventure roguelike for the terminal.")
     parser.add_argument("--seed", type=int, help="seed the dungeon generator for a repeatable run")
+    parser.add_argument("--no-color", action="store_true", help="play without colors (also set by NO_COLOR)")
     args = parser.parse_args()
+    # https://no-color.org: any non-empty NO_COLOR value turns colors off.
+    use_color = not (args.no_color or os.environ.get("NO_COLOR"))
     try:
-        run(args.seed)
+        run(args.seed, use_color)
     except KeyboardInterrupt:
         sys.exit(0)

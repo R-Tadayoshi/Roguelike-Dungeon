@@ -212,6 +212,19 @@ class GameTests(unittest.TestCase):
         self.game.submit("yes")
         self.assertFalse(self.game.running)
 
+    def test_color_command_toggles_without_using_a_turn(self):
+        self.assertTrue(self.game.use_color)
+        self.game.submit("color off")
+        self.assertFalse(self.game.use_color)
+        self.game.submit("colour")
+        self.assertTrue(self.game.use_color)
+        self.assertEqual(self.game.turn, 0)
+
+    def test_color_preference_survives_restart(self):
+        game = Game(seed=1, use_color=False)
+        game.new_game()
+        self.assertFalse(game.use_color)
+
     def test_unknown_command(self):
         self.game.submit("juggle")
         self.assertIn("help", self.last_texts(2))

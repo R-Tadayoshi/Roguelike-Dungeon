@@ -43,6 +43,10 @@ On macOS or Linux, use `python3 -m venv .venv` and `source .venv/bin/activate`.
 
 Run `python main.py --seed 42` to play a repeatable dungeon.
 
+Run `python main.py --no-color` to play in plain black and white. Setting the
+`NO_COLOR` environment variable does the same. You can also switch while playing
+with `color off` and `color on`.
+
 ## Commands
 
 Type a command and press Enter. Short forms are in brackets.
@@ -58,6 +62,7 @@ Type a command and press Enter. Short forms are in brackets.
 | `inventory` [`i`]             | List what you're carrying |
 | `wait` [`z`]                  | Let a turn pass |
 | `rest`                        | Rest until healed. Only works with no enemies around, and something may find you |
+| `color on` / `color off`      | Switch colors on or off (`color` alone toggles) |
 | `stats`, `help`, `quit`       | Show your stats, list commands, quit (asks to confirm) |
 
 The parser ignores filler words, so "attack the goblin" and "pick up a potion" work.

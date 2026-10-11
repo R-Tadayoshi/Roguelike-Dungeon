@@ -53,18 +53,22 @@ def hp_style(hp: int, max_hp: int) -> str:
 class Canvas:
     """An off-screen character grid. Drawing the whole frame in one write avoids flicker."""
 
-    def __init__(self, term: Terminal, width: int, height: int):
+    def __init__(self, term: Terminal, width: int, height: int, color: bool = True):
         self.term = term
         self.width = width
         self.height = height
         self.chars = [[" "] * width for _ in range(height)]
         self.styles = [[""] * width for _ in range(height)]
+        self.color = color
         self._cache: dict[str, str] = {}
 
     def seq(self, style: str) -> str:
         if style not in self._cache:
             name = style
-            if self.term.number_of_colors < 256:
+            if not self.color:
+                # Monochrome: keep bold for emphasis and reverse for the cursor, drop every color.
+                name = style if style == "reverse" else ("bold" if style.startswith("bold") else "")
+            elif self.term.number_of_colors < 256:
                 name = FALLBACK_16.get(style, style)
             self._cache[style] = str(getattr(self.term, name)) if name else ""
         return self._cache[style]
@@ -142,7 +146,7 @@ class Renderer:
 
     def draw(self, game, editor: LineEditor) -> None:
         t = self.term
-        canvas = Canvas(t, t.width, t.height)
+        canvas = Canvas(t, t.width, t.height, color=game.use_color)
         if self.too_small():
             msg = f"Please enlarge the window to at least {MIN_WIDTH}x{MIN_HEIGHT} (now {t.width}x{t.height})."
             for i, line in enumerate(textwrap.wrap(msg, max(10, t.width - 2))):

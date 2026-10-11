@@ -37,6 +37,7 @@ HELP_LINES = [
     "  inventory [i]       check your pack",
     "  wait [z]            let a turn pass",
     "  rest                rest until healed",
+    "  color on/off        switch colors",
     "  stats  help  quit",
     "Up/Down: earlier commands. PgUp/PgDn: scroll.",
 ]
@@ -83,8 +84,10 @@ def find_by_name(query: str, things: list):
 
 
 class Game:
-    def __init__(self, seed: int | None = None):
+    def __init__(self, seed: int | None = None, use_color: bool = True):
         self.rng = random.Random(seed)
+        # A display preference, so it survives restarts.
+        self.use_color = use_color
         self.new_game()
 
     def new_game(self) -> None:
@@ -358,6 +361,19 @@ class Game:
             f"attack {p.attack}, defense {p.defense}. Depth {self.depth}, {p.kills} kills, turn {self.turn}.",
             "wheat",
         )
+        return False
+
+    def do_color(self, target: str) -> bool:
+        if target in ("on", "yes"):
+            self.use_color = True
+        elif target in ("off", "no", "none"):
+            self.use_color = False
+        elif target == "":
+            self.use_color = not self.use_color
+        else:
+            self.log("Type 'color on' or 'color off'.", "gray70")
+            return False
+        self.log(f"Colors are now {'on' if self.use_color else 'off'}.", "gray70")
         return False
 
     def do_help(self, target: str) -> bool:

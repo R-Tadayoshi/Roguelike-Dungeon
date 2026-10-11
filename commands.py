@@ -17,6 +17,7 @@ VERBS = {
     "rest": "rest", "sleep": "rest",
     "descend": "descend", "down": "descend", "d": "descend", ">": "descend",
     "stats": "stats", "status": "stats", "me": "stats",
+    "color": "color", "colour": "color", "colors": "color", "colours": "color",
     "help": "help", "?": "help", "h": "help", "commands": "help",
     "quit": "quit", "exit": "quit", "q": "quit",
 }
