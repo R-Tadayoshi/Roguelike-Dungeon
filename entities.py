@@ -43,6 +43,7 @@ class Player(Actor):
         self.level = 1
         self.xp = 0
         self.kills = 0
+        self.inventory: list[Item] = []
 
     @property
     def xp_to_next(self) -> int:
@@ -68,9 +69,9 @@ class Monster(Actor):
     """A monster built from a template in data/monsters.py, scaled to the dungeon depth."""
 
     def __init__(self, x: int, y: int, kind: str, template: dict, depth: int):
-        hp = round(template["hp"] * (1 + 0.15 * (depth - 1)))
-        attack = template["attack"] + (depth - 1) // 2
-        defense = template["defense"] + (depth - 1) // 4
+        hp = round(template["hp"] * (1 + 0.12 * (depth - 1)))
+        attack = template["attack"] + depth // 3
+        defense = template["defense"] + depth // 5
         super().__init__(x, y, template["char"], template["color"], template["name"], hp, attack, defense)
         self.kind = kind
         self.template = template
@@ -78,3 +79,12 @@ class Monster(Actor):
         self.xp = template["xp"] + depth - 1
         self.alerted = False
         self.last_seen: tuple[int, int] | None = None
+
+
+class Item(Entity):
+    """An item built from a template in data/items.py."""
+
+    def __init__(self, x: int, y: int, kind: str, template: dict):
+        super().__init__(x, y, template["char"], template["color"], template["name"])
+        self.kind = kind
+        self.template = template

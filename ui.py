@@ -6,7 +6,7 @@ import textwrap
 
 from blessed import Terminal
 
-from game import DEAD
+from game import DEAD, INVENTORY, INVENTORY_SIZE
 from map_gen import FLOOR, MAP_HEIGHT, MAP_WIDTH, STAIRS, WALL
 
 SIDEBAR_X = MAP_WIDTH + 2
@@ -93,6 +93,8 @@ class Renderer:
             self.draw_log(canvas, game)
             if game.mode == DEAD:
                 self.draw_game_over(canvas, game)
+            elif game.mode == INVENTORY:
+                self.draw_inventory(canvas, game)
         print(canvas.render(), end="", flush=True)
 
     def draw_map(self, canvas: Canvas, game) -> None:
@@ -106,6 +108,9 @@ class Renderer:
                     continue
                 char, lit, remembered = TILE_STYLE[tile]
                 canvas.put(x, y, char, lit if gm.visible[y][x] else remembered)
+        for item in game.items:
+            if gm.visible[item.y][item.x]:
+                canvas.put(item.x, item.y, item.char, item.color)
         for m in game.visible_monsters():
             canvas.put(m.x, m.y, m.char, m.color)
         p = game.player
@@ -158,8 +163,25 @@ class Renderer:
             y += 1
         y += 1
 
+        canvas.put(x, y, f"PACK ({len(p.inventory)}/{INVENTORY_SIZE})", "bold_gold")
+        y += 1
+        groups = game.inventory_groups()
+        if not groups:
+            canvas.put(x, y, "Empty.", "gray50")
+            y += 1
+        for group in groups[:4]:
+            item = group[0]
+            canvas.put(x, y, item.char, item.color)
+            count = f" x{len(group)}" if len(group) > 1 else ""
+            canvas.put(x + 2, y, f"{item.name}{count}"[:26], "white")
+            y += 1
+        y += 1
+
         keys = [
             ("WASD/arrows", "move, attack"),
+            ("g", "pick up"),
+            ("i", "inventory"),
+            (">", "descend stairs"),
             (". or space", "wait a turn"),
             ("Esc", "quit"),
         ]
@@ -183,6 +205,19 @@ class Renderer:
             ("", ""),
             ("[R] descend again    [Q] quit", "bold_gold"),
         ]
+        self.draw_box(canvas, lines)
+
+    def draw_inventory(self, canvas: Canvas, game) -> None:
+        lines = [("INVENTORY", "bold_gold"), ("", "")]
+        groups = game.inventory_groups()
+        if not groups:
+            lines.append(("Your pack is empty.", "gray62"))
+        for i, group in enumerate(groups):
+            item = group[0]
+            count = f" x{len(group)}" if len(group) > 1 else ""
+            heal = f"  (+{item.template['amount']} HP)" if item.template["effect"] == "heal" else ""
+            lines.append((f"{chr(ord('a') + i)}) {item.name}{count}{heal}".ljust(40), "white"))
+        lines += [("", ""), ("Press a letter to use, Esc to close", "gray62")]
         self.draw_box(canvas, lines)
 
     def draw_box(self, canvas: Canvas, lines: list[tuple[str, str]]) -> None:
@@ -225,10 +260,22 @@ def key_to_action(key, mode: str) -> tuple | None:
         if name in ("q", "KEY_ESCAPE"):
             return ("quit",)
         return None
+    if mode == INVENTORY:
+        if name in ("KEY_ESCAPE", "i", "q"):
+            return ("close",)
+        if len(name) == 1 and "a" <= name <= "z":
+            return ("use", ord(name) - ord("a"))
+        return None
     if name in MOVE_KEYS:
         return ("move", *MOVE_KEYS[name])
     if name in (".", " "):
         return ("wait",)
+    if name == "g":
+        return ("pickup",)
+    if name == "i":
+        return ("inventory",)
+    if name in (">", "KEY_ENTER"):
+        return ("descend",)
     if name == "KEY_ESCAPE" or str(key) == "Q":
         return ("quit",)
     return None
