@@ -1,4 +1,13 @@
-"""Terminal rendering and key handling with blessed."""
+"""Terminal rendering and line input with blessed.
+
+Layout:
+    status bar (HP, depth, level, XP, kills)
+    ───────────────────────────────────────────
+    story / message log           │ sidebar: room map,
+    (scrolls, newest at bottom)   │ monsters here, pack
+    ───────────────────────────────────────────
+    > command line
+"""
 
 from __future__ import annotations
 
@@ -7,27 +16,19 @@ import textwrap
 
 from blessed import Terminal
 
-from game import CONFIRM_QUIT, DEAD, HELP, HISTORY, INVENTORY, INVENTORY_SIZE
-from map_gen import FLOOR, MAP_HEIGHT, MAP_WIDTH, STAIRS, WALL
+from game import CONFIRM_QUIT, DEAD, INVENTORY_SIZE
+from map_gen import GRID_HEIGHT
 
-SIDEBAR_X = MAP_WIDTH + 2
-MIN_WIDTH = SIDEBAR_X + 28
-MIN_HEIGHT = MAP_HEIGHT + 7
-
-# Tile appearance: (char, style in view, style when only remembered).
-TILE_STYLE = {
-    WALL: ("#", "sienna", "gray27"),
-    FLOOR: (".", "gray50", "gray19"),
-    STAIRS: (">", "bold_white", "gray40"),
-}
-
+SIDEBAR_WIDTH = 30
+MIN_WIDTH = 80
+MIN_HEIGHT = 24
 
 # On 16-color terminals blessed would round the dark grays down to black, hiding
-# remembered map tiles, so substitute basic colors that stay readable.
+# text, so substitute basic colors that stay readable.
 FALLBACK_16 = {
-    "gray19": "bright_black", "gray27": "bright_black", "gray30": "bright_black",
-    "gray40": "bright_black", "gray46": "bright_black", "gray50": "white",
-    "gray62": "white", "gray70": "white", "sienna": "yellow", "wheat": "yellow",
+    "gray27": "bright_black", "gray30": "bright_black", "gray40": "bright_black",
+    "gray50": "bright_black", "gray62": "white", "gray70": "white",
+    "wheat": "yellow", "orchid": "magenta", "orange": "yellow", "tan": "yellow",
 }
 
 
@@ -94,14 +95,52 @@ class Canvas:
         return "".join(out)
 
 
+class LineEditor:
+    """The command line: typing, backspace, Enter, and Up/Down through earlier commands."""
+
+    MAX_LENGTH = 60
+
+    def __init__(self):
+        self.buffer = ""
+        self.history: list[str] = []
+        self.history_pos = 0
+
+    def handle(self, key) -> str | None:
+        """Process one keystroke. Returns the submitted line when Enter is pressed."""
+        name = key.name if key.is_sequence else None
+        if name == "KEY_ENTER" or str(key) in ("\r", "\n"):
+            line, self.buffer = self.buffer.strip(), ""
+            if line and (not self.history or self.history[-1] != line):
+                self.history.append(line)
+            self.history_pos = len(self.history)
+            return line
+        if name in ("KEY_BACKSPACE", "KEY_DELETE") or str(key) in ("\x08", "\x7f"):
+            self.buffer = self.buffer[:-1]
+        elif name == "KEY_ESCAPE":
+            self.buffer = ""
+        elif name == "KEY_UP" and self.history:
+            self.history_pos = max(0, self.history_pos - 1)
+            self.buffer = self.history[self.history_pos]
+        elif name == "KEY_DOWN" and self.history:
+            self.history_pos = min(len(self.history), self.history_pos + 1)
+            self.buffer = self.history[self.history_pos] if self.history_pos < len(self.history) else ""
+        elif not key.is_sequence and str(key).isprintable() and len(self.buffer) < self.MAX_LENGTH:
+            self.buffer += str(key)
+        return None
+
+
 class Renderer:
     def __init__(self, term: Terminal):
         self.term = term
+        self.scroll = 0  # Lines scrolled up from the newest message.
 
     def too_small(self) -> bool:
         return self.term.width < MIN_WIDTH or self.term.height < MIN_HEIGHT
 
-    def draw(self, game) -> None:
+    def page(self) -> int:
+        return max(1, self.term.height - 6)
+
+    def draw(self, game, editor: LineEditor) -> None:
         t = self.term
         canvas = Canvas(t, t.width, t.height)
         if self.too_small():
@@ -109,50 +148,26 @@ class Renderer:
             for i, line in enumerate(textwrap.wrap(msg, max(10, t.width - 2))):
                 canvas.put(1, 1 + i, line, "bold_red")
         else:
-            self.draw_map(canvas, game)
+            story_width = canvas.width - SIDEBAR_WIDTH - 2
             self.draw_status(canvas, game)
-            self.draw_sidebar(canvas, game)
-            self.draw_log(canvas, game)
+            canvas.put(0, 1, "─" * canvas.width, "gray30")
+            canvas.put(0, canvas.height - 2, "─" * canvas.width, "gray30")
+            for y in range(2, canvas.height - 2):
+                canvas.put(story_width, y, "│", "gray30")
+            self.draw_story(canvas, game, story_width)
+            self.draw_sidebar(canvas, game, story_width + 2)
+            self.draw_prompt(canvas, game, editor)
             if game.mode == DEAD:
-                self.draw_game_over(canvas, game)
-            elif game.mode == INVENTORY:
-                self.draw_inventory(canvas, game)
-            elif game.mode == HELP:
-                self.draw_help(canvas)
-            elif game.mode == HISTORY:
-                self.draw_history(canvas, game)
-            elif game.mode == CONFIRM_QUIT:
-                self.draw_box(canvas, [("Abandon this run and quit?", "bold_white"), ("", ""), ("[Y] quit    [N] keep playing", "bold_gold")])
+                self.draw_game_over(canvas, game, story_width)
         print(canvas.render(), end="", flush=True)
-
-    def draw_map(self, canvas: Canvas, game) -> None:
-        gm = game.game_map
-        for y in range(gm.height):
-            for x in range(gm.width):
-                if not gm.explored[y][x]:
-                    continue
-                tile = gm.tiles[y][x]
-                if tile == WALL and not gm.is_wall_face(x, y):
-                    continue
-                char, lit, remembered = TILE_STYLE[tile]
-                canvas.put(x, y, char, lit if gm.visible[y][x] else remembered)
-        for item in game.items:
-            if gm.visible[item.y][item.x]:
-                canvas.put(item.x, item.y, item.char, item.color)
-        for m in game.visible_monsters():
-            canvas.put(m.x, m.y, m.char, m.color)
-        p = game.player
-        canvas.put(p.x, p.y, p.char, p.color)
 
     def draw_status(self, canvas: Canvas, game) -> None:
         p = game.player
-        y = MAP_HEIGHT
-        x = 1
+        x, y = 1, 0
         canvas.put(x, y, "HP ", "bold_white")
         x += 3
-        bar_style = hp_style(p.hp, p.max_hp)
         filled = round(12 * p.hp / p.max_hp)
-        canvas.put(x, y, "█" * filled, bar_style)
+        canvas.put(x, y, "█" * filled, hp_style(p.hp, p.max_hp))
         canvas.put(x + filled, y, "░" * (12 - filled), "gray27")
         x += 13
         for label, value in (
@@ -164,206 +179,130 @@ class Renderer:
         ):
             canvas.put(x, y, label, "gray62")
             canvas.put(x + len(label), y, value, "bold_white")
-            x += len(label) + len(value) + 4
-        canvas.put(0, y + 1, "─" * (canvas.width - 1), "gray30")
+            x += len(label) + len(value) + 3
 
-    def draw_sidebar(self, canvas: Canvas, game) -> None:
+    def draw_story(self, canvas: Canvas, game, width: int) -> None:
+        top, bottom = 2, canvas.height - 3
+        height = bottom - top + 1
+        # Wrap from the newest message backwards, only as far as the screen can show.
+        lines: list[tuple[str, str]] = []
+        index = len(game.messages)
+        while index > 0 and len(lines) < height + self.scroll:
+            index -= 1
+            msg = game.messages[index]
+            # The latest command's results are in full color; older story fades.
+            style = msg.color if index >= game.fresh_from else "gray50"
+            lines[:0] = [(line, style) for line in textwrap.wrap(msg.text, width - 2) or [""]]
+        self.scroll = max(0, min(self.scroll, len(lines) - height))
+        end = len(lines) - self.scroll
+        for i, (line, style) in enumerate(lines[max(0, end - height):end]):
+            canvas.put(1, top + i, line, style)
+        if self.scroll:
+            canvas.put(width - 15, bottom, " more below ↓ ", "reverse")
+
+    def draw_sidebar(self, canvas: Canvas, game, x: int) -> None:
         p = game.player
-        x = SIDEBAR_X
-        y = 0
-        canvas.put(x, y, "THE ADVENTURER", "bold_gold")
+        y = 2
+        bottom = canvas.height - 3
+        canvas.put(x, y, f"ATTACK {p.attack}   DEFENSE {p.defense}", "wheat")
         y += 1
-        canvas.put(x, y, f"Attack  {p.attack:<4}Defense {p.defense}", "wheat")
+        canvas.put(x, y, f"MAP OF DEPTH {game.depth}", "bold_gold")
+        y = self.draw_map(canvas, game, x, y + 1)
+        for dx, text, style in ((0, "@", "bold_yellow"), (1, " you", "gray62"),
+                                (7, ">", "bold_white"), (8, " stairs", "gray62"),
+                                (17, "?", "gray50"), (18, " unknown", "gray62")):
+            canvas.put(x + dx, y, text, style)
         y += 2
 
-        canvas.put(x, y, "IN SIGHT", "bold_gold")
+        canvas.put(x, y, "HERE", "bold_gold")
         y += 1
-        seen = game.visible_monsters()
-        if not seen:
-            canvas.put(x, y, "Nothing stirs.", "gray50")
+        if not game.room.monsters:
+            canvas.put(x, y, "No enemies.", "gray50")
             y += 1
-        for m in seen[:6]:
-            canvas.put(x, y, m.char, m.color)
-            canvas.put(x + 2, y, m.name[:14], "white")
+        for i, m in enumerate(game.room.monsters[:4], 1):
+            if y > bottom:
+                return
+            canvas.put(x, y, f"{i} ", "gray62")
+            canvas.put(x + 2, y, m.name[:14], m.color)
             filled = max(1, round(8 * m.hp / m.max_hp))
-            canvas.put(x + 17, y, "█" * filled, hp_style(m.hp, m.max_hp))
-            canvas.put(x + 17 + filled, y, "░" * (8 - filled), "gray27")
+            canvas.put(x + 18, y, "█" * filled, hp_style(m.hp, m.max_hp))
+            canvas.put(x + 18 + filled, y, "░" * (8 - filled), "gray27")
             y += 1
         y += 1
+        if y >= bottom:
+            return
 
         canvas.put(x, y, f"PACK ({len(p.inventory)}/{INVENTORY_SIZE})", "bold_gold")
         y += 1
-        groups = game.inventory_groups()
+        groups: dict[str, list] = {}
+        for item in p.inventory:
+            groups.setdefault(item.name, []).append(item)
         if not groups:
             canvas.put(x, y, "Empty.", "gray50")
+        for name, items in groups.items():
+            if y > bottom:
+                return
+            canvas.put(x, y, "!", items[0].color)
+            canvas.put(x + 2, y, f"{name} x{len(items)}"[:SIDEBAR_WIDTH - 2], "white")
             y += 1
-        for group in groups[:4]:
-            item = group[0]
-            canvas.put(x, y, item.char, item.color)
-            count = f" x{len(group)}" if len(group) > 1 else ""
-            canvas.put(x + 2, y, f"{item.name}{count}"[:26], "white")
-            y += 1
-        y += 1
 
-        keys = [
-            ("WASD/arrows", "move, attack"),
-            ("g", "pick up"),
-            ("i", "inventory"),
-            (">", "descend stairs"),
-            (". or space", "wait a turn"),
-            ("m", "message history"),
-            ("?", "help"),
-            ("Esc", "quit"),
-        ]
-        y = max(y, MAP_HEIGHT - len(keys) - 1)
-        canvas.put(x, y, "KEYS", "bold_gold")
-        for i, (k, desc) in enumerate(keys):
-            canvas.put(x, y + 1 + i, k, "bold_white")
-            canvas.put(x + 12, y + 1 + i, desc, "gray62")
+    def draw_map(self, canvas: Canvas, game, left: int, top: int) -> int:
+        """Draw visited rooms as [ ] boxes joined by doorways; return the next free row."""
+        floor = game.floor
+        visited = [r for r in floor.rooms if r.visited]
+        seen = {n for r in visited for n in r.exits.values() if not n.visited}
+        for room in seen:
+            canvas.put(left + room.gx * 4, top + room.gy * 2, "[?]", "gray40")
+        for room in visited:
+            x, y = left + room.gx * 4, top + room.gy * 2
+            canvas.put(x, y, "[ ]", "gray70")
+            if room is game.room:
+                canvas.put(x + 1, y, "@", "bold_yellow")
+            elif room.stairs:
+                canvas.put(x + 1, y, ">", "bold_white")
+            elif room.items:
+                canvas.put(x + 1, y, "!", "bold_red")
+            # Doorways sit in the gap between two boxes.
+            if "east" in room.exits:
+                canvas.put(x + 3, y, "-", "gray62")
+            if "west" in room.exits:
+                canvas.put(x - 1, y, "-", "gray62")
+            if "south" in room.exits:
+                canvas.put(x + 1, y + 1, "|", "gray62")
+            if "north" in room.exits:
+                canvas.put(x + 1, y - 1, "|", "gray62")
+        return top + GRID_HEIGHT * 2 - 1
 
-    def draw_game_over(self, canvas: Canvas, game) -> None:
+    def draw_prompt(self, canvas: Canvas, game, editor: LineEditor) -> None:
+        y = canvas.height - 1
+        prompt = {DEAD: "(restart/quit) > ", CONFIRM_QUIT: "(yes/no) > "}.get(game.mode, "> ")
+        canvas.put(1, y, prompt, "bold_cyan")
+        canvas.put(1 + len(prompt), y, editor.buffer, "white")
+        canvas.put(1 + len(prompt) + len(editor.buffer), y, " ", "reverse")
+
+    def draw_game_over(self, canvas: Canvas, game, story_width: int) -> None:
         p = game.player
         tally = ", ".join(f"{n} {name}{'s' if n > 1 else ''}" for name, n in p.kills_by_kind.items())
         lines = [
             ("YOU HAVE DIED", "bold_red"),
             ("", ""),
-            (f"You were {game.death_cause} on depth {game.depth}", "wheat"),
-            (f"after {game.turn} turns in the dark.", "wheat"),
+            (f"You were {game.death_cause}", "wheat"),
+            (f"on depth {game.depth}, after {game.turn} turns.", "wheat"),
             ("", ""),
-            (f"Depth reached:  {game.depth}".ljust(24), "white"),
-            (f"Level reached:  {p.level}".ljust(24), "white"),
-            (f"Monsters slain: {p.kills}".ljust(24), "white"),
+            (f"Depth reached:  {game.depth}".ljust(22), "white"),
+            (f"Level reached:  {p.level}".ljust(22), "white"),
+            (f"Monsters slain: {p.kills}".ljust(22), "white"),
         ]
-        for line in textwrap.wrap(tally, 44):
+        for line in textwrap.wrap(tally, story_width - 10):
             lines.append((line, "gray62"))
-        lines += [("", ""), ("[R] descend again    [Q] quit", "bold_gold")]
-        self.draw_box(canvas, lines)
+        lines += [("", ""), ("Type 'restart' or 'quit'", "bold_gold")]
 
-    def draw_inventory(self, canvas: Canvas, game) -> None:
-        lines = [("INVENTORY", "bold_gold"), ("", "")]
-        groups = game.inventory_groups()
-        if not groups:
-            lines.append(("Your pack is empty.", "gray62"))
-        for i, group in enumerate(groups):
-            item = group[0]
-            count = f" x{len(group)}" if len(group) > 1 else ""
-            heal = f"  (+{item.template['amount']} HP)" if item.template["effect"] == "heal" else ""
-            lines.append((f"{chr(ord('a') + i)}) {item.name}{count}{heal}".ljust(40), "white"))
-        lines += [("", ""), ("Press a letter to use, Esc to close", "gray62")]
-        self.draw_box(canvas, lines)
-
-    def draw_help(self, canvas: Canvas) -> None:
-        lines = [
-            ("HOW TO PLAY", "bold_gold"),
-            ("", ""),
-            ("Find the stairs (>) and descend as deep as you dare.", "wheat"),
-            ("Walk into a monster to attack it. Monsters act after you do.", "wheat"),
-            ("", ""),
-            ("WASD/arrows  move or attack    g   pick up item".ljust(58), "white"),
-            ("> or Enter   descend stairs    i   inventory / drink".ljust(58), "white"),
-            (". or space   wait a turn       m   message history".ljust(58), "white"),
-            ("Esc          quit              ?   this help".ljust(58), "white"),
-            ("", ""),
-            ("@ you   r rat   g goblin   s skeleton   ! potion   > stairs", "gray62"),
-            ("", ""),
-            ("Press any key to return", "gray62"),
-        ]
-        self.draw_box(canvas, lines)
-
-    def draw_history(self, canvas: Canvas, game) -> None:
-        width, height = MAP_WIDTH - 6, MAP_HEIGHT - 6
-        wrapped: list[tuple[str, str]] = []
-        for msg in game.messages:
-            for line in textwrap.wrap(message_text(msg), width) or [""]:
-                wrapped.append((line.ljust(width), msg.color))
-        end = max(height, len(wrapped) - game.history_offset)
-        body = wrapped[max(0, end - height):end]
-        body += [("".ljust(width), "")] * (height - len(body))
-        lines = [("MESSAGE HISTORY", "bold_gold"), *body, ("", ""), ("Up/Down or W/S to scroll, Esc to close", "gray62")]
-        self.draw_box(canvas, lines)
-
-    def draw_box(self, canvas: Canvas, lines: list[tuple[str, str]]) -> None:
-        """Draw a bordered, centered panel over the map."""
-        inner = max(len(text) for text, _ in lines) + 4
-        left = max(0, (MAP_WIDTH - inner - 2) // 2)
-        top = max(0, (MAP_HEIGHT - len(lines) - 2) // 2)
+        inner = min(story_width - 4, max(len(text) for text, _ in lines) + 4)
+        left = max(0, (story_width - inner - 2) // 2)
+        top = max(2, (canvas.height - len(lines) - 2) // 2)
         canvas.put(left, top, "╔" + "═" * inner + "╗", "gold")
         for i, (text, style) in enumerate(lines):
             row = top + 1 + i
             canvas.put(left, row, "║" + " " * inner + "║", "gold")
             canvas.put(left + 1 + (inner - len(text)) // 2, row, text, style)
         canvas.put(left, top + len(lines) + 1, "╚" + "═" * inner + "╝", "gold")
-
-    def draw_log(self, canvas: Canvas, game) -> None:
-        top = MAP_HEIGHT + 2
-        height = canvas.height - top
-        width = canvas.width - 2
-        lines: list[tuple[str, str]] = []
-        for msg in game.messages[-height:]:
-            # Messages from the latest turn are in full color; older ones fade to gray.
-            fresh = msg.turn >= game.turn - 1
-            for line in textwrap.wrap(message_text(msg), width) or [""]:
-                lines.append((line, msg.color if fresh else "gray46"))
-        for i, (line, style) in enumerate(lines[-height:]):
-            canvas.put(1, top + i, line, style)
-
-
-def message_text(msg) -> str:
-    return msg.text if msg.count == 1 else f"{msg.text} (x{msg.count})"
-
-
-MOVE_KEYS = {
-    "w": (0, -1), "s": (0, 1), "a": (-1, 0), "d": (1, 0),
-    "KEY_UP": (0, -1), "KEY_DOWN": (0, 1), "KEY_LEFT": (-1, 0), "KEY_RIGHT": (1, 0),
-}
-
-
-def key_to_action(key, mode: str) -> tuple | None:
-    """Translate a blessed keystroke into a game action tuple for the current mode."""
-    name = key.name if key.is_sequence else str(key).lower()
-    if mode == DEAD:
-        if name == "r":
-            return ("restart",)
-        if name in ("q", "KEY_ESCAPE"):
-            return ("quit",)
-        return None
-    if mode == CONFIRM_QUIT:
-        return ("quit",) if name == "y" else ("close",)
-    if mode == HELP:
-        return ("close",)
-    if mode == HISTORY:
-        if name in ("KEY_UP", "w"):
-            return ("scroll", 1)
-        if name in ("KEY_DOWN", "s"):
-            return ("scroll", -1)
-        if name == "KEY_PGUP":
-            return ("scroll", 10)
-        if name == "KEY_PGDOWN":
-            return ("scroll", -10)
-        if name in ("KEY_ESCAPE", "m", "q"):
-            return ("close",)
-        return None
-    if mode == INVENTORY:
-        if name in ("KEY_ESCAPE", "i", "q"):
-            return ("close",)
-        if len(name) == 1 and "a" <= name <= "z":
-            return ("use", ord(name) - ord("a"))
-        return None
-
-    if name in MOVE_KEYS:
-        return ("move", *MOVE_KEYS[name])
-    if name in (".", " "):
-        return ("wait",)
-    if name == "g":
-        return ("pickup",)
-    if name == "i":
-        return ("open", INVENTORY)
-    if name == "m":
-        return ("open", HISTORY)
-    if name == "?":
-        return ("open", HELP)
-    if name in (">", "KEY_ENTER"):
-        return ("descend",)
-    if name == "KEY_ESCAPE" or str(key) == "Q":
-        return ("open", CONFIRM_QUIT)
-    return None

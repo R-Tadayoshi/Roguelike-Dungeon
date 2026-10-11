@@ -6,13 +6,14 @@ import argparse
 import sys
 
 from game import Game
-from ui import Renderer, key_to_action, make_terminal
+from ui import LineEditor, Renderer, make_terminal
 
 
 def run(seed: int | None = None) -> None:
     term = make_terminal()
     game = Game(seed)
     renderer = Renderer(term)
+    editor = LineEditor()
     with term.fullscreen(), term.cbreak(), term.hidden_cursor():
         size = None
         dirty = True
@@ -22,20 +23,26 @@ def run(seed: int | None = None) -> None:
                 print(term.clear, end="")
                 dirty = True
             if dirty:
-                renderer.draw(game)
+                renderer.draw(game, editor)
                 dirty = False
             # Short timeout so window resizes are noticed (Windows has no SIGWINCH).
             key = term.inkey(timeout=0.25, esc_delay=0.05)
             if not key:
                 continue
-            action = key_to_action(key, game.mode)
-            if action:
-                game.handle(action)
-                dirty = True
+            dirty = True
+            if key.name == "KEY_PGUP":
+                renderer.scroll += renderer.page()
+            elif key.name == "KEY_PGDOWN":
+                renderer.scroll = max(0, renderer.scroll - renderer.page())
+            else:
+                line = editor.handle(key)
+                if line:
+                    renderer.scroll = 0
+                    game.submit(line)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="A medieval fantasy roguelike for the terminal.")
+    parser = argparse.ArgumentParser(description="A medieval fantasy text adventure roguelike for the terminal.")
     parser.add_argument("--seed", type=int, help="seed the dungeon generator for a repeatable run")
     args = parser.parse_args()
     try:

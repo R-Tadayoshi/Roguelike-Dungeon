@@ -1,26 +1,13 @@
-"""Things that live on the map: the player, monsters and items."""
+"""The player, monsters and items."""
 
 from __future__ import annotations
 
 
-class Entity:
-    def __init__(self, x: int, y: int, char: str, color: str, name: str):
-        self.x = x
-        self.y = y
-        self.char = char
-        self.color = color
-        self.name = name
-
-    @property
-    def pos(self) -> tuple[int, int]:
-        return (self.x, self.y)
-
-
-class Actor(Entity):
+class Actor:
     """Anything that has hit points and can fight."""
 
-    def __init__(self, x, y, char, color, name, hp: int, attack: int, defense: int):
-        super().__init__(x, y, char, color, name)
+    def __init__(self, name: str, hp: int, attack: int, defense: int):
+        self.name = name
         self.max_hp = hp
         self.hp = hp
         self.attack = attack
@@ -38,8 +25,8 @@ class Actor(Entity):
 
 
 class Player(Actor):
-    def __init__(self, x: int, y: int):
-        super().__init__(x, y, "@", "bold_yellow", "you", hp=30, attack=5, defense=1)
+    def __init__(self):
+        super().__init__("you", hp=30, attack=5, defense=1)
         self.level = 1
         self.xp = 0
         self.kills = 0
@@ -48,7 +35,8 @@ class Player(Actor):
 
     @property
     def xp_to_next(self) -> int:
-        return self.level * 20
+        # Grows faster than monster XP does, so each level takes longer than the last.
+        return 15 * self.level + 3 * self.level * self.level
 
     def gain_xp(self, amount: int) -> int:
         """Add experience; return how many levels were gained."""
@@ -58,8 +46,8 @@ class Player(Actor):
             self.xp -= self.xp_to_next
             self.level += 1
             gained += 1
-            self.max_hp += 8
-            self.hp = min(self.max_hp, self.hp + 8)
+            self.max_hp += 7
+            self.hp = min(self.max_hp, self.hp + 7)
             self.attack += 1
             if self.level % 2 == 0:
                 self.defense += 1
@@ -69,23 +57,28 @@ class Player(Actor):
 class Monster(Actor):
     """A monster built from a template in data/monsters.py, scaled to the dungeon depth."""
 
-    def __init__(self, x: int, y: int, kind: str, template: dict, depth: int):
-        hp = round(template["hp"] * (1 + 0.12 * (depth - 1)))
-        attack = template["attack"] + depth // 3
-        defense = template["defense"] + depth // 5
-        super().__init__(x, y, template["char"], template["color"], template["name"], hp, attack, defense)
+    def __init__(self, kind: str, template: dict, depth: int):
+        # Monsters toughen steadily with depth so the player can't simply out-level the dungeon.
+        hp = round(template["hp"] * (1 + 0.2 * (depth - 1)))
+        attack = template["attack"] + (depth - 1) * 2 // 3
+        defense = template["defense"] + (depth - 1) // 3
+        super().__init__(template["name"], hp, attack, defense)
         self.kind = kind
         self.template = template
-        self.ai = template.get("ai", "chase")
+        self.char = template["char"]
+        self.color = template["color"]
         self.xp = template["xp"] + depth - 1
         self.alerted = False
-        self.last_seen: tuple[int, int] | None = None
+        # The turn it walked into the player's room; it can't attack until the next turn.
+        self.arrived_turn = -1
 
 
-class Item(Entity):
+class Item:
     """An item built from a template in data/items.py."""
 
-    def __init__(self, x: int, y: int, kind: str, template: dict):
-        super().__init__(x, y, template["char"], template["color"], template["name"])
+    def __init__(self, kind: str, template: dict):
         self.kind = kind
         self.template = template
+        self.name = template["name"]
+        self.char = template["char"]
+        self.color = template["color"]

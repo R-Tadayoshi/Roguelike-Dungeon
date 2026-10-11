@@ -1,11 +1,13 @@
 """Monster definitions.
 
 To add a monster, add an entry here. Fields:
-  name, char, color       how it looks (color is any blessed color name, e.g. "tan", "bold_red")
+  name, char, color       how it shows in the sidebar (color is any blessed color name, e.g. "tan")
   hp, attack, defense     base stats at depth 1 (scaled up on deeper floors)
   xp                      experience awarded for the kill
-  ai                      "chase" (beeline for the player) or "erratic" (chases, but sometimes skitters randomly)
+  follow                  chance (0-1) it chases you into the next room when you leave mid-fight
+  drop                    chance (0-1) it leaves a healing potion behind when it dies
   spawn                   list of (min_depth, weight): the last entry whose min_depth <= depth is used
+  lurk                    how it's described when you look around a room it's in
   notice / hit / miss / death   narration; one line is picked at random each time
 """
 
@@ -18,8 +20,10 @@ MONSTERS = {
         "attack": 3,
         "defense": 0,
         "xp": 3,
-        "ai": "erratic",
+        "follow": 0.5,
+        "drop": 0.05,
         "spawn": [(1, 60), (3, 35), (6, 15)],
+        "lurk": "A giant rat sniffs the air, whiskers twitching.",
         "notice": [
             "A giant rat squeaks and scurries toward you!",
             "Red eyes glint in the dark. A giant rat bares its teeth.",
@@ -46,8 +50,10 @@ MONSTERS = {
         "attack": 4,
         "defense": 1,
         "xp": 8,
-        "ai": "chase",
+        "follow": 0.8,
+        "drop": 0.2,
         "spawn": [(1, 30), (3, 50), (6, 40)],
+        "lurk": "A goblin glares at you, notched blade drawn.",
         "notice": [
             "A goblin shrieks a war-cry and charges!",
             "A goblin spots you and draws a notched blade.",
@@ -74,8 +80,10 @@ MONSTERS = {
         "attack": 6,
         "defense": 2,
         "xp": 15,
-        "ai": "chase",
+        "follow": 0.6,
+        "drop": 0.25,
         "spawn": [(2, 10), (4, 35), (6, 55)],
+        "lurk": "A skeleton sways in place, its bones creaking.",
         "notice": [
             "Bones rattle as a skeleton lurches to life!",
             "A skeleton turns its empty sockets toward you.",
