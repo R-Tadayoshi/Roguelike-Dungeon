@@ -5,8 +5,18 @@ from __future__ import annotations
 import argparse
 import sys
 
-from game import Game
-from ui import LineEditor, Renderer, make_terminal
+try:
+    import blessed  # noqa: F401
+except ImportError:
+    sys.exit(
+        "The 'blessed' library is not installed for this Python.\n"
+        "From the project folder, run:\n\n"
+        f'    "{sys.executable}" -m pip install -r requirements.txt\n\n'
+        "then start the game again with: python main.py"
+    )
+
+from game import Game  # noqa: E402
+from ui import LineEditor, Renderer, make_terminal  # noqa: E402
 
 
 def run(seed: int | None = None) -> None:
