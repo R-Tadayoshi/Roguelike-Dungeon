@@ -12,11 +12,11 @@ SIDEBAR_X = MAP_WIDTH + 2
 MIN_WIDTH = SIDEBAR_X + 28
 MIN_HEIGHT = MAP_HEIGHT + 7
 
-# Tile appearance: (char, lit style).
+# Tile appearance: (char, style in view, style when only remembered).
 TILE_STYLE = {
-    WALL: ("#", "sienna"),
-    FLOOR: (".", "gray50"),
-    STAIRS: (">", "bold_white"),
+    WALL: ("#", "sienna", "gray27"),
+    FLOOR: (".", "gray50", "gray19"),
+    STAIRS: (">", "bold_white", "gray40"),
 }
 
 
@@ -86,11 +86,13 @@ class Renderer:
         gm = game.game_map
         for y in range(gm.height):
             for x in range(gm.width):
+                if not gm.explored[y][x]:
+                    continue
                 tile = gm.tiles[y][x]
                 if tile == WALL and not gm.is_wall_face(x, y):
                     continue
-                char, style = TILE_STYLE[tile]
-                canvas.put(x, y, char, style)
+                char, lit, remembered = TILE_STYLE[tile]
+                canvas.put(x, y, char, lit if gm.visible[y][x] else remembered)
         p = game.player
         canvas.put(p.x, p.y, p.char, p.color)
 

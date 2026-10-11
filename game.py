@@ -6,6 +6,7 @@ import random
 from dataclasses import dataclass
 
 from entities import Player
+from fov import compute_fov
 from map_gen import generate_floor
 
 
@@ -34,6 +35,10 @@ class Game:
     def build_floor(self) -> None:
         self.game_map = generate_floor(self.rng)
         self.player.x, self.player.y = self.game_map.start
+        self.update_fov()
+
+    def update_fov(self) -> None:
+        compute_fov(self.game_map, self.player.x, self.player.y)
 
     # -- messages --------------------------------------------------------
     def log(self, text: str, color: str = "white") -> None:
@@ -56,6 +61,7 @@ class Game:
         if not self.game_map.is_walkable(nx, ny):
             return  # Bumping a wall costs no turn.
         self.player.x, self.player.y = nx, ny
+        self.update_fov()
         self.end_turn()
 
     def end_turn(self) -> None:
